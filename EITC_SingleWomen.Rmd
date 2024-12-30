@@ -1,0 +1,171 @@
+---
+title: "Earned Income Tax Credit Effects on Single Women"
+author: "Soryn Lurding"
+date: "October 3, 2024"
+output: pdf_document
+---
+
+Difference-in-Differences: Replication Exercise from the notes
+
+The data are about the expansion of the Earned Income Tax Credit. The sample only contains single women. This legislation is aimed at providing a tax break for low income individuals.  For some background on the subject, see
+
+Eissa, Nada, and Jeffrey B. Liebman. 1996. Labor Supply Responses to the Earned Income Tax Credit. Quarterly Journal of Economics. 111(2): 605-637.
+
+
+Variable Names and Definitions
+
+state: Factor variable containg the state's FIPS code.
+year: Calendar Year
+urate: unemployment rate for the state and year
+children: number of children in the household
+nonwhite: the person identifies as non-White
+finc: Family household income
+earn: Earned income
+unearn: unearned income
+age: Age of the mother in years
+ed: Years of schooling
+work: Indicator variable equal to 1 if the person is currently working
+
+The homework questions:
+
+1. Provide Descriptive Statistics for the data. Format nicely, not just R printout. Here is an example below. I have already provided the code to read in the data below. You need to create the data summary table.
+```{r echo=TRUE, results='asis',warning=FALSE,message=FALSE, eval=TRUE}
+require(foreign)
+eitc<-read.dta("https://github.com/CausalReinforcer/Stata/raw/master/eitc.dta")
+library(modelsummary)
+
+#Renaming variables for readability
+eitc <- eitc %>% 
+  rename("State ID" = state,
+         "Year" = year,
+         "Unemployment Rate" = urate,
+         "Number of Children" = children,
+         "Nonwhite Identifying" = nonwhite,
+         "Family Household Income" = finc,
+         "Earned Income" = earn,
+         "Age" = age,
+         "Years of Schooling" = ed,
+         "Working or Not" = work,
+         "Unearned Income" = unearn)
+
+#Data summary table:
+datasummary(All(eitc) ~ Mean + SD + Min + Max, data = eitc, title = "Data Summary")
+```
+
+2. Calculate the sample means of all variables for (a) single women with no children, (b) single women with 1 child, and (c) single women with 2+ children. __Hint: Use the tidyverse to make this table. You can either filter the data or use dplyr to construct groups.You can even use datasummary to do this step. Below is one example__
+```{r echo=TRUE, eval=TRUE}
+# Make the appropriate changes (i.e. dataframe name and correct factor variable)
+#Separating factor variables
+eitc$`No Children` <- ifelse(eitc$`Number of Children`==0, 1, 0)
+eitc$`One Child` <- ifelse(eitc$`Number of Children`==1, 1, 0)
+eitc$`Two or more Children` <- ifelse(eitc$`Number of Children`>=2, 1, 0)
+
+
+#Tables    
+datasummary(All(eitc) ~ mean * factor(eitc$`No Children`),data = eitc,title = "Summary for Single Women with No Children")
+datasummary(All(eitc) ~ mean * factor(eitc$`One Child`),data = eitc, title = "Summary for Single Women with One Child")
+datasummary(All(eitc) ~ mean * factor(eitc$`Two or more Children`),data = eitc, title = "Summary for Single Women with Two or more Children")
+```
+
+
+3. Construct a variable for the "treatment" called ANYKIDS. This variable should equal 1 if they have any children and zero otherwise. Create a second variable to indicate after the expansion (called POST93-should be 1 for 1994 and later).
+
+```{r eval=TRUE}
+eitc$ANYKIDS <- ifelse(eitc$`Number of Children` >= 1, 1, 0)
+eitc$POST93 <- ifelse(eitc$Year >= 1994, 1, 0)
+```
+
+
+4. Create a graph which plots mean annual employment rates by year (1991-1996) for single women with children (treatment) and without children (control). __Hint: you should have two lines on the same graph.__ I would suggest to use ggplot to make this plot. Here is some sample code. The variable "work" is your dependent variable.
+```{r echo=TRUE, eval=TRUE}
+library(ggplot2)
+
+# Take average value of 'work' by year, conditional on anykids
+minfo = aggregate(eitc$`Working or Not`, list(eitc$Year,eitc$ANYKIDS == 1), mean)
+
+# rename column headings (variables)
+names(minfo) = c("YR","Treatment","LFPR")
+# Attach a new column with labels
+minfo$Group[1:6] = "Single women, no children (Control)"
+minfo$Group[7:12] = "Single women, children (Treatment)"
+
+
+qplot(YR, LFPR, data=minfo, geom=c("point","line"), colour=Group,
+xlab="Year", ylab="Labor Force Participation Rate", main = "Annual Unemployment by Year")
+
+```
+
+5. Do the trends between the two groups appear to be parallel? Why is this important?
+The trends seem to be parallel until 1994.
+This is important because of the Parallel Trends Assumption. The Parallel Trends Assumption states that the change in the treatment group is equal to the change in the control group when neither group receives the active treatment. This is essential because we are then able to assume that if the treatment group had never been treated, the average change in the outcome variable would have been identical to the average change in the outcome variable for the control group.
+
+6. Calculate the unconditional difference-in-difference estimates of the effect of the 1993 EITC expansion on employment of single women. __Hint: This means calculate the DID treatment effect by just subtracting means (i.e. no regression)__
+```{r eval=TRUE}
+# Create two additional dummy variables to indicate before/after
+# and treatment/control groups.
+# the EITC went into effect in the year 1994
+eitc$POST93 = as.numeric(eitc$Year >= 1994)
+
+# The EITC only affects women with at least one child, so the
+# treatment group will be all women with children.
+eitc$ANYKIDS = as.numeric(eitc$`Number of Children` >= 1)
+
+# Compute the four data points needed in the DID calculation:
+# a= The avg employment among women with no children prior to expansion:
+a = sapply(subset(eitc, POST93 == 0 & ANYKIDS == 0, select=`Working or Not`), mean) 
+
+# b=The avg employment among women with children prior to expansion:
+b = sapply(subset(eitc, POST93 == 0 & ANYKIDS == 1, select=`Working or Not`), mean) 
+
+# c=the avg employment among women with no children after expansion:
+c = sapply(subset(eitc, POST93 == 1 & ANYKIDS == 0, select=`Working or Not`), mean) 
+
+# d=the avg employment among women with children after expansion:
+d = sapply(subset(eitc, POST93 == 1 & ANYKIDS == 1, select=`Working or Not`), mean) 
+
+# DID Calculation:
+(a-b)-(c-d)
+
+
+```
+
+
+7. Now run a regression to estimate the conditional difference-in-difference estimate of the effect of the EITC. Use all women with children as the treatment group. __Hint: your answers for 6 and 7 should match.__
+
+```{r eval=TRUE}
+# Estimate a difference in difference regression. You should be using ANYKIDS and POST93 in your regression. Work is your dependent variable
+
+reg1 <- lm(`Working or Not` ~ POST93 * ANYKIDS, data = eitc)
+
+modelsummary(list(reg1), title = "Difference in Difference Regression",stars = TRUE)
+
+```
+
+
+8. Re-estimate this model including demographic characteristics as well as state and year fixed effect. Use the variable nonwhite, age, ed, and unearn as demographics.
+```{r eval=TRUE}
+library(lfe)
+reg2 <- felm(`Working or Not` ~ POST93*ANYKIDS + `Nonwhite Identifying` + `Age` + `Years of Schooling` + `Unearned Income` + factor(`State ID`) + factor(`Year`), data=eitc)
+modelsummary(list(reg2), title = "Difference in Difference Regression Controlling for Factors",stars = TRUE)
+```
+
+
+9. Explain why you can't use finc, earn, and uearn in the same regression.
+
+We cannot use fincm, earnm, and uearn in this same regression because of multicollinearity. If we know Earned Income (earn), we can then know Family Household Income (finc) by adding Earned Income and Unearned income, which we already have in our model. In a similar way we can find Earned Income if we were given Family Household Income by subtracting Unearned Income by Family Household Income. This makes the information redundant which is not good for our model. 
+
+ 
+10. Estimate a "placebo" treatment model. Take data from only the pre-reform period. Use the same treatment and control groups. Introduce a placebo policy that begins in 1992 instead of 1994 (so 1992 and 1993 both have this fake policy).
+--change the policy from 94 to 92 and then only use the data up to 93, dont use 94 itself. everything before that is our untreated time
+
+```{r eval=TRUE}
+eitc$POST92 = as.numeric(eitc$Year >= 1992)
+
+reg3 <-felm(`Working or Not` ~ POST92*ANYKIDS + `Nonwhite Identifying` + `Age` + `Years of Schooling` + `Unearned Income` + factor(`State ID`) + factor(`Year`), data=eitc)
+
+
+#modelsummary(list(reg3), stars = TRUE)
+  
+modelsummary(list(reg1,reg2,reg3), stars = TRUE, title = "Difference in Difference Regression Not Controlling for Factors(1), Controlling for Factors(2), and Placebo Treatment Model(3)")
+
+```
